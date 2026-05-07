@@ -244,7 +244,7 @@ function AuctionatorFullScanFrameMixin:CheckPageComplete()
     self:EndProcessing()
   else
     self.currentPage = self.currentPage + 1
-    C_Timer.After(0.25, function()
+    C_Timer.After(0.67, function()
       if self.inProgress then
         self:SendPageQuery()
       end
