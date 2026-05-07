@@ -70,6 +70,13 @@ function AuctionatorAHThrottlingFrameMixin:OnEvent(eventName, ...)
     local progress, total = ...
     if progress == total then
       self.multisellInProgress = false
+      -- CMaNGOS does not reliably fire NEW_AUCTION_UPDATE after a multisell,
+      -- which leaves waitingForNewAuction stuck until the 10s timeout.
+      -- Clear it here so the throttle unblocks immediately.
+      if self.waitingForNewAuction then
+        FrameUtil.UnregisterFrameForEvents(self, NEW_AUCTION_EVENTS)
+        self.waitingForNewAuction = false
+      end
     end
 
   elseif eventName == "AUCTION_MULTISELL_FAILURE" then
