@@ -5,6 +5,9 @@ local FULL_SCAN_EVENTS = {
   "AUCTION_HOUSE_CLOSED",
 }
 
+local MAX_ITEMS_PER_PAGE = 50
+local PAGE_ITEM_TIMEOUT = 15  -- seconds before giving up on hung ContinueOnItemLoad callbacks
+
 function AuctionatorFullScanFrameMixin:OnLoad()
   Auctionator.Debug.Message("AuctionatorFullScanFrameMixin:OnLoad")
   Auctionator.EventBus:RegisterSource(self, "AuctionatorFullScanFrameMixin")
@@ -23,6 +26,16 @@ function AuctionatorFullScanFrameMixin:InitiateScan()
     self.state.TimeOfLastGetAllScan = time()
 
     self.inProgress = true
+    self.currentPage = 0
+    self.currentPageSize = 0
+    self.pageItemsWaiting = 0
+    self.totalItemsProcessed = 0
+    self.totalKnownItems = nil
+    self.lastProgress = 0  -- monotonic: progress never goes backwards
+    self.waitingForPage = false
+    self.sentQuery = false
+    self.pageAdvanced = true  -- starts true so the first SendPageQuery isn't guarded
+    self:ResetData()
 
     self:RegisterForEvents()
     Auctionator.Utilities.Message(AUCTIONATOR_L_STARTING_FULL_SCAN)
@@ -32,17 +45,54 @@ function AuctionatorFullScanFrameMixin:InitiateScan()
       ITEM_QUALITY_COLORS[-1] = {r=0, b=0, g=0}
     end
 
-    QueryAuctionItems("", nil, nil, 0, nil, nil, true, false, nil)
-    -- 10% complete after making the replicate request
-    Auctionator.EventBus:Fire(self, Auctionator.FullScan.Events.ScanProgress, 0.1)
+    -- CMaNGOS does not support the isGetAll (replicate) scan used by retail/TBC.
+    -- Use standard page-by-page queries via the AH queue (same as the regular scan).
+    self:SendPageQuery()
+    self:FireProgress(0.03)
   else
     Auctionator.Utilities.Message(self:NextScanMessage())
   end
 end
 
+-- Use the first return value (canQuery) only; CMaNGOS does not implement canDoGetAll.
 function AuctionatorFullScanFrameMixin:CanInitiate()
-  local _, canDoGetAll = CanSendAuctionQuery()
-  return canDoGetAll
+  local canQuery = CanSendAuctionQuery()
+  return canQuery
+end
+
+function AuctionatorFullScanFrameMixin:SendPageQuery()
+  self.waitingForPage = true
+  self.sentQuery = false
+
+  -- Small nudge so the bar moves while waiting for the server response.
+  self:FireProgress(self:GetCurrentProgress() + 0.02)
+
+  -- Go through the throttle queue so the client is actually ready to send.
+  self.lastQueuedQuery = function()
+    self.sentQuery = true
+    QueryAuctionItems("", nil, nil, self.currentPage, nil, nil, false, false, nil)
+  end
+  Auctionator.AH.Queue:Enqueue(self.lastQueuedQuery)
+end
+
+-- Wrapper that guarantees the progress bar only ever moves forward.
+function AuctionatorFullScanFrameMixin:FireProgress(value)
+  self.lastProgress = math.max(self.lastProgress, math.min(value, 0.95))
+  Auctionator.EventBus:Fire(self, Auctionator.FullScan.Events.ScanProgress, self.lastProgress)
+end
+
+-- Item-based progress so the bar moves on every item callback, not just per page.
+function AuctionatorFullScanFrameMixin:GetCurrentProgress()
+  local itemsDoneThisPage = self.currentPageSize - math.max(0, self.pageItemsWaiting)
+  local totalDone = self.totalItemsProcessed + math.max(0, itemsDoneThisPage)
+
+  if self.totalKnownItems and self.totalKnownItems > 0 then
+    return 0.05 + (totalDone / self.totalKnownItems) * 0.9
+  end
+
+  -- Assume at least one more full page beyond current.
+  local estimatedTotal = (self.currentPage + 2) * MAX_ITEMS_PER_PAGE
+  return math.min(0.05 + (totalDone / estimatedTotal) * 0.85, 0.94)
 end
 
 function AuctionatorFullScanFrameMixin:NextScanMessage()
@@ -55,111 +105,23 @@ end
 
 function AuctionatorFullScanFrameMixin:RegisterForEvents()
   Auctionator.Debug.Message("AuctionatorFullScanFrameMixin:RegisterForEvents()")
-
   FrameUtil.RegisterFrameForEvents(self, FULL_SCAN_EVENTS)
 end
 
 function AuctionatorFullScanFrameMixin:UnregisterForEvents()
   Auctionator.Debug.Message("AuctionatorFullScanFrameMixin:UnregisterForEvents()")
-
   FrameUtil.UnregisterFrameForEvents(self, FULL_SCAN_EVENTS)
 end
 
-function AuctionatorFullScanFrameMixin:CacheScanData()
-  -- 20% complete after server response
-  Auctionator.EventBus:Fire(self, Auctionator.FullScan.Events.ScanProgress, 0.2)
-
-  self:ResetData()
-  self.waitingForData = GetNumAuctionItems("list")
-
-  self:ProcessBatch(
-    0,
-    250,
-    self.waitingForData
-  )
-end
-
-function AuctionatorFullScanFrameMixin:ProcessBatch(startIndex, stepSize, limit)
-  if startIndex >= limit then
-    return
-  end
-
-  -- 20-100% complete when 0-100% through caching the scan
-  Auctionator.EventBus:Fire(self,
-    Auctionator.FullScan.Events.ScanProgress,
-    0.2 + startIndex/limit*0.8
-  )
-
-  Auctionator.Debug.Message("AuctionatorFullScanFrameMixin:ProcessBatch (links)", startIndex, stepSize, limit)
-
-  local i = startIndex
-  while i < startIndex+stepSize and i < limit do
-    local info = { GetAuctionItemInfo("list", i) }
-    local link = GetAuctionItemLink("list", i)
-    local itemID = info[17]
-
-    if itemID == 0 then
-      self.waitingForData = self.waitingForData - 1
-    elseif not link then
-      local item = Item:CreateFromItemID(itemID)
-      item:ContinueOnItemLoad((function(index)
-        return function()
-          -- Don't do anything when the AH window has been closed
-          if not self.inProgress then
-            return
-          end
-
-          local link = GetAuctionItemLink("list", index)
-
-          Auctionator.Utilities.DBKeyFromLink(link, function(dbKeys)
-            self.waitingForData = self.waitingForData - 1
-
-            table.insert(self.scanData, {
-              auctionInfo = { GetAuctionItemInfo("list", index) },
-              itemLink      = link,
-            })
-            table.insert(self.dbKeysMapping, dbKeys)
-
-            if self.waitingForData == 0 then
-              self:EndProcessing()
-            end
-          end)
-        end
-      end)(i))
-    else
-      Auctionator.Utilities.DBKeyFromLink(link, function(dbKeys)
-        self.waitingForData = self.waitingForData - 1
-        table.insert(self.scanData, {
-          auctionInfo = info,
-          itemLink      = link,
-        })
-        table.insert(self.dbKeysMapping, dbKeys)
-
-        if self.waitingForData == 0 then
-          self:EndProcessing()
-        end
-      end)
-    end
-
-    i = i + 1
-  end
-
-  if self.waitingForData == 0 and self.inProgress then
-    self:EndProcessing()
-  end
-
-  C_Timer.After(0.01, function()
-    self:ProcessBatch(startIndex + stepSize, stepSize, limit)
-  end)
-end
-
 function AuctionatorFullScanFrameMixin:OnEvent(event, ...)
-  if event == "AUCTION_ITEM_LIST_UPDATE" then
+  -- Mirror the same sentQuery guard used by AuctionatorAHScanFrameMixin so we
+  -- ignore any stray AUCTION_ITEM_LIST_UPDATE events from other operations.
+  if event == "AUCTION_ITEM_LIST_UPDATE" and self.waitingForPage and self.sentQuery then
     Auctionator.Debug.Message(event)
-
-    FrameUtil.UnregisterFrameForEvents(self, { "AUCTION_ITEM_LIST_UPDATE" })
-    self:CacheScanData()
-  elseif event =="AUCTION_HOUSE_CLOSED" then
+    self.waitingForPage = false
+    self.sentQuery = false
+    self:ProcessCurrentPage()
+  elseif event == "AUCTION_HOUSE_CLOSED" then
     self:UnregisterForEvents()
 
     if self.inProgress then
@@ -174,18 +136,132 @@ function AuctionatorFullScanFrameMixin:OnEvent(event, ...)
   end
 end
 
+function AuctionatorFullScanFrameMixin:ProcessCurrentPage()
+  local numItems = GetNumAuctionItems("list")
+  local isLastPage = numItems < MAX_ITEMS_PER_PAGE
+
+  self.isLastPage = isLastPage
+  self.currentPageSize = numItems
+  self.pageItemsWaiting = numItems
+  self.pageAdvanced = false  -- guard against CheckPageComplete double-fire
+
+  if isLastPage then
+    self.totalKnownItems = self.totalItemsProcessed + numItems
+  end
+
+  -- Chat feedback so the player can see the scan is progressing.
+  local pageLabel = "Full scan: page " .. (self.currentPage + 1)
+  if self.totalKnownItems then
+    Auctionator.Utilities.Message(pageLabel .. " (last, " .. numItems .. " auctions)")
+  else
+    Auctionator.Utilities.Message(pageLabel .. " (" .. numItems .. " auctions)...")
+  end
+
+  -- Immediate progress update the moment the page arrives.
+  self:FireProgress(self:GetCurrentProgress())
+
+  -- Safety timeout: if any ContinueOnItemLoad callback never fires (e.g. CMaNGOS
+  -- custom item not in the client DB), force-advance rather than hang forever.
+  local capturedPage = self.currentPage
+  C_Timer.After(PAGE_ITEM_TIMEOUT, function()
+    if self.inProgress and self.currentPage == capturedPage and not self.pageAdvanced then
+      Auctionator.Debug.Message("AuctionatorFullScanFrameMixin: timeout on page", capturedPage, "skipping", self.pageItemsWaiting, "unresolved items")
+      self.pageItemsWaiting = 0
+      self:CheckPageComplete()
+    end
+  end)
+
+  if numItems == 0 then
+    self:CheckPageComplete()
+    return
+  end
+
+  for i = 1, numItems do
+    local info = { GetAuctionItemInfo("list", i) }
+    local link = GetAuctionItemLink("list", i)
+    local itemID = info[17]
+
+    if itemID == 0 then
+      self.pageItemsWaiting = self.pageItemsWaiting - 1
+      self:FireProgress(self:GetCurrentProgress())
+    elseif not link then
+      -- Item not yet in client cache. Load it, then use GetItemLink as fallback
+      -- because the "list" buffer will be overwritten when the next page is fetched.
+      local capturedInfo = info
+      local capturedItemID = itemID
+      local item = Item:CreateFromItemID(capturedItemID)
+      item:ContinueOnItemLoad(function()
+        if not self.inProgress then return end
+        local resolvedLink = GetItemLink(capturedItemID)
+        if resolvedLink then
+          Auctionator.Utilities.DBKeyFromLink(resolvedLink, function(dbKeys)
+            self.pageItemsWaiting = self.pageItemsWaiting - 1
+            table.insert(self.scanData, {
+              auctionInfo = capturedInfo,
+              itemLink    = resolvedLink,
+            })
+            table.insert(self.dbKeysMapping, dbKeys)
+            self:FireProgress(self:GetCurrentProgress())
+            self:CheckPageComplete()
+          end)
+        else
+          self.pageItemsWaiting = self.pageItemsWaiting - 1
+          self:FireProgress(self:GetCurrentProgress())
+          self:CheckPageComplete()
+        end
+      end)
+    else
+      local capturedInfo = info
+      local capturedLink = link
+      Auctionator.Utilities.DBKeyFromLink(capturedLink, function(dbKeys)
+        self.pageItemsWaiting = self.pageItemsWaiting - 1
+        table.insert(self.scanData, {
+          auctionInfo = capturedInfo,
+          itemLink    = capturedLink,
+        })
+        table.insert(self.dbKeysMapping, dbKeys)
+        self:FireProgress(self:GetCurrentProgress())
+        self:CheckPageComplete()
+      end)
+    end
+  end
+
+  if self.pageItemsWaiting == 0 then
+    self:CheckPageComplete()
+  end
+end
+
+function AuctionatorFullScanFrameMixin:CheckPageComplete()
+  -- pageAdvanced guards against the timeout and the last item callback both
+  -- trying to advance the scan at the same time.
+  if self.pageItemsWaiting > 0 or self.pageAdvanced then return end
+  self.pageAdvanced = true
+
+  self.totalItemsProcessed = self.totalItemsProcessed + self.currentPageSize
+
+  if self.isLastPage then
+    self:FireProgress(0.95)
+    self:EndProcessing()
+  else
+    self.currentPage = self.currentPage + 1
+    C_Timer.After(0.25, function()
+      if self.inProgress then
+        self:SendPageQuery()
+      end
+    end)
+  end
+end
+
 local function GetInfo(auctionInfo)
   local available = auctionInfo[3]
   local buyoutPrice = auctionInfo[10]
   local effectivePrice = buyoutPrice / available
-    
+
   return math.ceil(effectivePrice), available
 end
 
-
 local function MergeInfo(scanData, dbKeysMapping)
   local allInfo = {}
-  local index = 0
 
   for index = 1, #scanData do
     local effectivePrice, available = GetInfo(scanData[index].auctionInfo)
@@ -204,6 +280,17 @@ local function MergeInfo(scanData, dbKeysMapping)
   end
 
   return allInfo
+end
+
+function AuctionatorFullScanFrameMixin:AbortScan()
+  if self.lastQueuedQuery then
+    Auctionator.AH.Queue:Remove(self.lastQueuedQuery)
+  end
+  self.inProgress = false
+  self:ResetData()
+  self:UnregisterForEvents()
+  Auctionator.Utilities.Message("Full scan stopped.")
+  Auctionator.EventBus:Fire(self, Auctionator.FullScan.Events.ScanFailed)
 end
 
 function AuctionatorFullScanFrameMixin:EndProcessing()

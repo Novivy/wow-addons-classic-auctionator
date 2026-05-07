@@ -7,10 +7,10 @@
     <Size y="15"/>
     <Layers>
       <Layer layer="ARTWORK">
-        <FontString parentKey="Text" inherits="GameFontHighlight" justifyH="LEFT" text="0%">
-          <Size x="60"/>
+        <FontString parentKey="Text" inherits="GameFontHighlight" justifyH="LEFT" text="">
+          <Size x="160"/>
           <Anchors>
-            <Anchor point="LEFT" relativePoint="LEFT" x="35"/>
+            <Anchor point="LEFT" relativePoint="LEFT" x="2"/>
             <Anchor point="TOP" relativeKey="$parent" relativePoint="TOP"/>
           </Anchors>
         </FontString>

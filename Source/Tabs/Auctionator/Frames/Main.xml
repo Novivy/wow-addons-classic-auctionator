@@ -228,7 +228,8 @@
         </Anchors>
       </Frame>
 
-      <Button inherits="UIPanelDynamicResizeButtonTemplate" text="AUCTIONATOR_L_FULL_SCAN_BUTTON" mixin="AuctionatorScanButtonMixin" parentKey="ScanButton">
+      <Button inherits="UIPanelButtonTemplate" text="AUCTIONATOR_L_FULL_SCAN_BUTTON" mixin="AuctionatorScanButtonMixin" parentKey="ScanButton">
+        <Size x="130" y="22"/>
         <Anchors>
           <Anchor point="BOTTOMRIGHT" relativeKey="$parent" relativePoint="TOPRIGHT" y="7" x="-3" />
         </Anchors>
@@ -236,6 +237,7 @@
           <KeyValue key="tooltipText" value="AUCTIONATOR_L_FULL_SCAN_TOOLTIP_TEXT" type="global" />
         </KeyValues>
         <Scripts>
+          <OnLoad method="OnLoad"/>
           <OnClick method="OnClick"/>
         </Scripts>
       </Button>

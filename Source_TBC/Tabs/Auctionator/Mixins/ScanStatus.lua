@@ -14,15 +14,9 @@ function AuctionatorFullScanStatusMixin:OnShow()
 end
 
 function AuctionatorFullScanStatusMixin:ReceiveEvent(event, eventData)
-  if event == Auctionator.FullScan.Events.ScanStart then
-    self.Text:SetText("0%")
-
-  elseif event == Auctionator.FullScan.Events.ScanProgress then
-    self.Text:SetText(tostring(math.floor(eventData*100)) .. "%")
-
-  elseif event == Auctionator.FullScan.Events.ScanComplete then
-    self.Text:SetText("100%")
-
+  if event == Auctionator.FullScan.Events.ScanStart or
+     event == Auctionator.FullScan.Events.ScanProgress then
+    self.Text:SetText("Scan in progress...")
   else
     self.Text:SetText("")
   end
