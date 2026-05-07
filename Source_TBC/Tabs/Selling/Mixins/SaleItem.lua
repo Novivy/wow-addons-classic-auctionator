@@ -193,13 +193,18 @@ function AuctionatorSaleItemMixin:GetNumStacks()
 end
 
 function AuctionatorSaleItemMixin:GetDeposit()
-  return GetAuctionDeposit(
+  local deposit = GetAuctionDeposit(
     self:GetDuration(),
     math.min(self:GetBidAmount(), MAXIMUM_BID_PRICE),
     math.min(self.StackPrice:GetAmount(), MAXIMUM_BID_PRICE),
     self:GetStackSize(),
     self:GetNumStacks()
   )
+  local multiplier = Auctionator.WHC.Durations.deposit
+  if multiplier > 0 then
+    return math.ceil(deposit * multiplier)
+  end
+  return deposit
 end
 
 -- We need to wait for whatever item is being posted to finish posting
