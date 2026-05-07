@@ -67,6 +67,8 @@ function AuctionatorSaleItemMixin:OnShow()
   SetOverrideBinding(self, false, Auctionator.Config.Get(Auctionator.Config.Options.SELLING_POST_SHORTCUT), "CLICK AuctionatorPostButton:LeftButton")
   SetOverrideBinding(self, false, Auctionator.Config.Get(Auctionator.Config.Options.SELLING_SKIP_SHORTCUT), "CLICK AuctionatorSkipPostingButton:LeftButton")
 
+  Auctionator.WHC.ApplyDurationLabels(self.Duration)
+
   self:UpdateSkipButton()
   self:Reset()
 end

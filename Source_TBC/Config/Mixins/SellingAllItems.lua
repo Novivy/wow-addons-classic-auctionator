@@ -19,6 +19,7 @@ function AuctionatorConfigSellingAllItemsFrameMixin:OnShow()
   self.currentUndercutPreference = Auctionator.Config.Get(Auctionator.Config.Options.AUCTION_SALES_PREFERENCE)
 
   self.DurationGroup:SetSelectedValue(Auctionator.Config.Get(Auctionator.Config.Options.AUCTION_DURATION))
+  Auctionator.WHC.ApplyDurationLabels(self.DurationGroup)
   self.SalesPreference:SetSelectedValue(self.currentUndercutPreference)
 
   self:OnSalesPreferenceChange(self.currentUndercutPreference)

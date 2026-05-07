@@ -12,6 +12,7 @@
   <Include file="Core\Manifest.xml" />
   <Include file="Events\Manifest.xml" />
   <Include file="Buying\Manifest.xml" />
+  <Include file="WHC\Manifest.xml"/>
   <Include file="Tabs\Manifest.xml" />
   <Include file="API\Manifest.xml"/>
   <Include file="FullScan\Manifest.xml"/>
