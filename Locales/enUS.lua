@@ -308,6 +308,11 @@ AUCTIONATOR_LOCALES.enUS = function()
   L["SPLASH_9106_FEATURES_1"] = "Search box and recent searches panel in the Shopping tab."
   L["SPLASH_9106_FEATURES_2"] = "Button to sort a shopping list's terms alphabetically."
   L["SPLASH_9106_FEATURES_3"] = "Option to show not found search terms in a shopping list's results."
+  L["SPLASH_5000_DESCRIPTION"] = "Bug fixes for vanilla Classic private servers."
+  L["SPLASH_5000_FIXES_HEADER"] = "Bug Fixes"
+  L["SPLASH_5000_FIXES_1"] = "Herbs and other items returning an invalid class ID from the server now correctly appear in the selling tab."
+  L["SPLASH_5000_FIXES_2"] = "Items whose data has not yet loaded when the selling tab opens are now shown once the data arrives."
+
   L["SPLASH_9108_DESCRIPTION"] = "The main feature of this release is the newer Retail appearance now working on WoW classic (Burning Crusade and Vanilla). Almost all retail features work on classic. There are the usual bugfixes on all versions of Auctionator."
   L["SPLASH_9108_FEATURES_HEADER"] = "Features of the classic release"
   L["SPLASH_9108_FEATURES_1"] = "Searching shopping lists and doing quick searches."

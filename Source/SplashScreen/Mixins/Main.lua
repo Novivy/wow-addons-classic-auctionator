@@ -1,6 +1,19 @@
 -- We should probably move this into another file too
 local MESSAGES = {
   {
+    Version = "50.0.0",
+    Description = AUCTIONATOR_L_SPLASH_5000_DESCRIPTION,
+    Sections = {
+      {
+        Title = AUCTIONATOR_L_SPLASH_5000_FIXES_HEADER,
+        Entries = {
+          AUCTIONATOR_L_SPLASH_5000_FIXES_1,
+          AUCTIONATOR_L_SPLASH_5000_FIXES_2,
+        },
+      },
+    },
+  },
+  {
     Version = "9.1.8",
     Description = AUCTIONATOR_L_SPLASH_9108_DESCRIPTION,
     Sections = {
