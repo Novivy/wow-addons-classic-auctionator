@@ -1,6 +1,7 @@
 local BAG_TABLE_LAYOUT = { }
 local BAG_EVENTS = {
   "BAG_UPDATE",
+  "GET_ITEM_INFO_RECEIVED",
 }
 local BAG_AUCTIONATOR_EVENTS = {
   Auctionator.Selling.Events.BagRefresh,
@@ -45,6 +46,8 @@ end
 function AuctionatorBagDataProviderMixin:LoadBagData()
   Auctionator.Debug.Message("AuctionatorBagDataProviderMixin:LoadBagData()")
 
+  self.needsItemInfoReload = false
+
   local itemMap = {}
   local orderedKeys = {}
   local results = {}
@@ -57,15 +60,24 @@ function AuctionatorBagDataProviderMixin:LoadBagData()
       local location = ItemLocation:CreateFromBagAndSlot(bagId, slot)
       if C_Item.DoesItemExist(location) then
         local itemInfo = Auctionator.Utilities.ItemInfoFromLocation(location)
-        local tempId = self:UniqueKey(itemInfo)
 
-        if not IsIgnoredItemKey(tempId) and itemInfo.quality ~= Enum.ItemQuality.Poor then
+        if itemInfo.classId == nil then
+          -- Item data not yet in client cache; request it and reload when ready
+          self.needsItemInfoReload = true
+          local itemId = C_Item.GetItemID(location)
+          if itemId then
+            GetItemInfo(itemId)
+          end
+        else
+          local tempId = self:UniqueKey(itemInfo)
 
-          if itemMap[tempId] == nil then
-            table.insert(orderedKeys, tempId)
-            itemMap[tempId] = itemInfo
-          else
-            itemMap[tempId].count = itemMap[tempId].count + itemInfo.count
+          if not IsIgnoredItemKey(tempId) and itemInfo.quality ~= Enum.ItemQuality.Poor then
+            if itemMap[tempId] == nil then
+              table.insert(orderedKeys, tempId)
+              itemMap[tempId] = itemInfo
+            else
+              itemMap[tempId].count = itemMap[tempId].count + itemInfo.count
+            end
           end
         end
       end
@@ -85,8 +97,15 @@ function AuctionatorBagDataProviderMixin:LoadBagData()
   self:AppendEntries(results, true)
 end
 
-function AuctionatorBagDataProviderMixin:OnEvent(...)
-  self:Reload()
+function AuctionatorBagDataProviderMixin:OnEvent(event, ...)
+  if event == "GET_ITEM_INFO_RECEIVED" then
+    if self.needsItemInfoReload then
+      self.needsItemInfoReload = false
+      self:Reload()
+    end
+  else
+    self:Reload()
+  end
 end
 
 function AuctionatorBagDataProviderMixin:UniqueKey(entry)

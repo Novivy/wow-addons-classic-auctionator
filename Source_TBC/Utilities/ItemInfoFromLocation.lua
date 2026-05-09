@@ -18,6 +18,19 @@ function Auctionator.Utilities.ItemInfoFromLocation(location)
 
   local _, _, _, _, _, classID, _ = GetItemInfoInstant(itemLink)
 
+  -- GetItemInfoInstant returns -1 for classId on some item types in WoW Classic.
+  -- Fall back to GetItemInfo (position 12) as a second attempt.
+  if classID == nil or classID == -1 then
+    local _, _, _, _, _, _, _, _, _, _, _, fallbackClassId = GetItemInfo(itemLink)
+    classID = fallbackClassId
+  end
+
+  -- Some private servers return -1 for herb classId even from GetItemInfo.
+  -- Herbs are Trade Goods in vanilla WoW, so remap -1 to Tradegoods.
+  if classID == -1 then
+    classID = Enum.ItemClass.Tradegoods
+  end
+
   -- The first time the AH is loaded sometimes when a full scan is running the
   -- quality info may not be available. This just gives a sensible fail value.
   if quality == -1 then
