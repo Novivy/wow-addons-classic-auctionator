@@ -83,7 +83,13 @@ function AuctionatorSaleItemMixin:OnHide()
     Auctionator.Components.Events.EnterPressed,
   })
   Auctionator.EventBus:UnregisterSource(self)
-  self:UnlockItem()
+  -- During active posting, tab switches fire OnHide but the AH is still open.
+  -- Preserve state so posting can continue when the tab comes back (OnShow).
+  -- Only clean up if posting is idle, or if the AH window itself closed.
+  if not (self.pendingStacks and self.pendingStacks > 0) or not AuctionFrame:IsShown() then
+    self:UnlockItem()
+    self.pendingStacks = nil
+  end
   ClearOverrideBindings(self)
 end
 
@@ -284,6 +290,10 @@ function AuctionatorSaleItemMixin:ReceiveEvent(event, ...)
 
   elseif event == Auctionator.AH.Events.ThrottleUpdate then
     self:UpdatePostButtonState()
+    if Auctionator.AH.IsNotThrottled() and self.pendingStacks and self.pendingStacks > 0 then
+      self.pendingStacks = nil
+      self:OnAllStacksPosted()
+    end
 
   elseif event == Auctionator.Selling.Events.RequestPost then
     self:PostItem()
@@ -449,8 +459,13 @@ function AuctionatorSaleItemMixin:DisplayMaxNumStacks()
 end
 
 function AuctionatorSaleItemMixin:Reset()
+  -- Guard: if actively mid-posting, preserve state so ThrottleUpdate can continue.
+  if self.pendingStacks and self.pendingStacks > 0 then
+    self:Update()
+    return
+  end
   self:UnlockItem()
-
+  self.pendingStacks = nil
   self:Update()
 end
 
@@ -543,7 +558,6 @@ end
 
 function AuctionatorSaleItemMixin:PostItem()
   if not self:GetPostButtonState() then
-    Auctionator.Debug.Message("Trying to post when we can't. Returning")
     return
   end
 
@@ -554,64 +568,74 @@ function AuctionatorSaleItemMixin:PostItem()
   local buyoutPrice = self.StackPrice:GetAmount()
   local deposit = self:GetDeposit()
 
+  -- Save stack size memory (pure Lua — safe before PostAuction)
   local stackSizeMemory = Auctionator.Config.Get(Auctionator.Config.Options.STACK_SIZE_MEMORY)
   local basicDBKey = Auctionator.Utilities.BasicDBKeyFromLink(self.itemInfo.itemLink)
-  -- Only save stack size if its different to the global default
   if stackSize ~= self.normalStackSize then
     stackSizeMemory[basicDBKey] = stackSize
   else
     stackSizeMemory[basicDBKey] = nil
   end
 
-  Auctionator.AH.PostAuction(startingBid, buyoutPrice, duration, stackSize, numStacks)
+  self.pendingStacks      = numStacks
+  self.pendingTotalStacks = numStacks
+  self.pendingStackSize   = stackSize
+  self.pendingBid         = startingBid
+  self.pendingBuyout      = buyoutPrice
+  self.pendingDuration    = duration
+  self.pendingDeposit     = deposit
+  self.pendingUnitPrice   = self.UnitPrice:GetAmount()
+  self.pendingMinPrice    = self.minPriceSeen
 
-  --Print auction to chat
+  -- Send all stacks in one burst. WoW sends numStacks CMSG_AUCTION_SELL_ITEM
+  -- packets immediately, each carrying UseCount=stackSize.
+  -- HermesProxy appends UseCount to each vanilla packet; CMaNGOS splits
+  -- stackSize items per call server-side.
+  Auctionator.AH.PostAuction(startingBid, buyoutPrice, duration, stackSize, numStacks)
+end
+
+function AuctionatorSaleItemMixin:OnAllStacksPosted()
+  local lastItemInfo = self.itemInfo
+  local numStacks   = self.pendingTotalStacks or 1
+  local stackSize   = self.pendingStackSize   or 1
+  local buyoutPrice = self.pendingBuyout      or 0
+  local startingBid = self.pendingBid         or 0
+  local deposit     = self.pendingDeposit     or 0
+  local unitPrice   = self.pendingUnitPrice   or 0
+  local minPrice    = self.pendingMinPrice    or 0
+
   if Auctionator.Config.Get(Auctionator.Config.Options.AUCTION_CHAT_LOG) then
     Auctionator.Utilities.Message(Auctionator.Selling.ComposeAuctionPostedMessage({
-      itemLink = self.itemInfo.itemLink,
-      numStacks = numStacks,
-      stackSize = stackSize,
+      itemLink    = lastItemInfo.itemLink,
+      numStacks   = numStacks,
+      stackSize   = stackSize,
       stackBuyout = buyoutPrice,
     }))
   end
 
-  Auctionator.EventBus:Fire(self,
-    Auctionator.Selling.Events.AuctionCreated,
-    {
-      itemLink = self.itemInfo.itemLink,
-      quantity = numStacks * stackSize,
-      buyoutAmount = self.UnitPrice:GetAmount(),
-      bidAmount = startingBid,
-      deposit = deposit,
-    }
-  )
+  Auctionator.EventBus:Fire(self, Auctionator.Selling.Events.AuctionCreated, {
+    itemLink     = lastItemInfo.itemLink,
+    quantity     = numStacks * stackSize,
+    buyoutAmount = unitPrice,
+    bidAmount    = startingBid,
+    deposit      = deposit,
+  })
 
-  -- If not seen in any queries before this, then this price is the first one
-  -- listed. Update the database to include this price.
-  if self.minPriceSeen == 0 or self.minPriceSeen > self.UnitPrice:GetAmount() then
-    local minPrice = self.UnitPrice:GetAmount()
+  if minPrice == 0 or minPrice > unitPrice then
     local count = stackSize * numStacks
-    Auctionator.Utilities.DBKeyFromLink(self.itemInfo.itemLink, function(dbKeys)
+    Auctionator.Utilities.DBKeyFromLink(lastItemInfo.itemLink, function(dbKeys)
       for _, key in ipairs(dbKeys) do
-        Auctionator.Database:SetPrice(key, minPrice, count)
+        Auctionator.Database:SetPrice(key, unitPrice, count)
       end
     end)
   end
 
-  -- Save item info for refreshing search results
-  local lastItemInfo = self.itemInfo
   self:Reset()
 
-  if (Auctionator.Config.Get(Auctionator.Config.Options.SELLING_AUTO_SELECT_NEXT) and
-      IsValidItem(lastItemInfo.nextItem)
-     ) then
-    -- Option to automatically select the next item in the bag view
-    Auctionator.EventBus:Fire(
-      self, Auctionator.Selling.Events.BagItemClicked, lastItemInfo.nextItem
-    )
-
+  if Auctionator.Config.Get(Auctionator.Config.Options.SELLING_AUTO_SELECT_NEXT) and
+     IsValidItem(lastItemInfo.nextItem) then
+    Auctionator.EventBus:Fire(self, Auctionator.Selling.Events.BagItemClicked, lastItemInfo.nextItem)
   else
-    -- Search for current auctions of the last item posted
     Auctionator.EventBus:Fire(self, Auctionator.Selling.Events.RefreshBuying, lastItemInfo)
   end
 end
