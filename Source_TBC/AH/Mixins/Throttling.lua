@@ -77,6 +77,10 @@ function AuctionatorAHThrottlingFrameMixin:OnEvent(eventName, ...)
         FrameUtil.UnregisterFrameForEvents(self, NEW_AUCTION_EVENTS)
         self.waitingForNewAuction = false
       end
+      -- Refresh owner list so Cancelling tab shows all newly posted stacks.
+      self.timeSinceLastQuery = 0
+      self.waitingForOwnerAuctionsUpdate = true
+      FrameUtil.RegisterFrameForEvents(self, OWNER_LIST_EVENTS)
     end
 
   elseif eventName == "AUCTION_MULTISELL_FAILURE" then
@@ -84,6 +88,10 @@ function AuctionatorAHThrottlingFrameMixin:OnEvent(eventName, ...)
     FrameUtil.UnregisterFrameForEvents(self, NEW_AUCTION_EVENTS)
     self.multisellInProgress = false
     self.waitingForNewAuction = false
+    -- Refresh owner list so any stacks that did post before failure are visible.
+    self.timeSinceLastQuery = 0
+    self.waitingForOwnerAuctionsUpdate = true
+    FrameUtil.RegisterFrameForEvents(self, OWNER_LIST_EVENTS)
 
   elseif eventName == "AUCTION_OWNED_LIST_UPDATE" then
     self:ResetTimeout()
