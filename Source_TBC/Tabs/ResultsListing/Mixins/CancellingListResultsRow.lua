@@ -10,8 +10,12 @@ function AuctionatorCancellingListResultsRowMixin:OnClick(button, ...)
     ChatEdit_InsertLink(self.rowData.itemLink)
 
   elseif button == "LeftButton" and Auctionator.AH.IsNotThrottled() then
-    self.rowData.cancelled = true
-    self:ApplyFade()
+    self.rowData.numStacks = self.rowData.numStacks - 1
+    Auctionator.Utilities.SetStacksText(self.rowData)
+    if self.rowData.numStacks == 0 then
+      self.rowData.cancelled = true
+      self:ApplyFade()
+    end
 
     Auctionator.EventBus
       :RegisterSource(self, "CancellingListResultRow")

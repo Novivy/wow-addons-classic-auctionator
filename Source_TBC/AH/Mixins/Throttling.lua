@@ -116,7 +116,8 @@ function AuctionatorAHThrottlingFrameMixin:OnUpdate(elapsed)
       self:ResetTimeout()
     end
   end
-  if self.timeout ~= TIMEOUT then
+  local queryThrottled = self.waitingForNewAuction or self.multisellInProgress or self.waitingOnBid
+  if self.timeout ~= TIMEOUT and queryThrottled then
     Auctionator.EventBus:Fire(self, Auctionator.AH.Events.CurrentThrottleTimeout, self.timeout)
   end
 
@@ -140,7 +141,7 @@ function AuctionatorAHThrottlingFrameMixin:IsReady()
 end
 
 function AuctionatorAHThrottlingFrameMixin:AnyWaiting()
-  return self.waitingForNewAuction or self.multisellInProgress or self.waitingOnBid or self.waitingForOwnerAuctionsUpdate
+  return self.waitingForNewAuction or self.multisellInProgress or self.waitingOnBid
 end
 
 function AuctionatorAHThrottlingFrameMixin:ResetTimeout()
@@ -167,7 +168,7 @@ end
 
 function AuctionatorAHThrottlingFrameMixin:AuctionCancelled()
   self:ResetTimeout()
-  self.timeSinceLastQuery = 0
+  self.timeSinceLastQuery = 2  -- poll on the very next OnUpdate frame
   self.waitingForOwnerAuctionsUpdate = true
   self.oldReady = false
   FrameUtil.RegisterFrameForEvents(self, OWNER_LIST_EVENTS)
