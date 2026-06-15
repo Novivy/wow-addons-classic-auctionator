@@ -586,6 +586,10 @@ function AuctionatorSaleItemMixin:PostItem()
   self.pendingDeposit     = deposit
   self.pendingUnitPrice   = self.UnitPrice:GetAmount()
   self.pendingMinPrice    = self.minPriceSeen
+  -- Cache itemInfo: posting empties the bag slot, so OnUpdate may clear
+  -- self.itemInfo (invalid bag location) before the throttle clears and
+  -- OnAllStacksPosted runs.
+  self.pendingItemInfo    = self.itemInfo
 
   -- Send all stacks in one burst. WoW sends numStacks CMSG_AUCTION_SELL_ITEM
   -- packets immediately, each carrying UseCount=stackSize.
@@ -595,7 +599,12 @@ function AuctionatorSaleItemMixin:PostItem()
 end
 
 function AuctionatorSaleItemMixin:OnAllStacksPosted()
-  local lastItemInfo = self.itemInfo
+  local lastItemInfo = self.pendingItemInfo or self.itemInfo
+  self.pendingItemInfo = nil
+  if lastItemInfo == nil then
+    self:Reset()
+    return
+  end
   local numStacks   = self.pendingTotalStacks or 1
   local stackSize   = self.pendingStackSize   or 1
   local buyoutPrice = self.pendingBuyout      or 0
